@@ -23,11 +23,10 @@ def upload_file(channel_id, file_path):
     print(file_path, "file_path")
     try:
         # Upload the file to a specific channel
-        response = client.files_upload(
-            channels=channel_id,
+        response = client.files_upload_v2(
+            channel=channel_id,
             file=file_path,
-            filename=filename,
-            title="File Upload"
+            title="File Upload",
         )
         clear_directory('./temp_downloads')
         assert response["file"]  # The response contains information about the uploaded file
@@ -71,13 +70,17 @@ def parse_tag_and_category(tag):
 
 def process_and_send_file(file_path, files_data):
     channel_id = files_data["channel_id"]
-    df = pd.read_excel(file_path, engine='openpyxl')
     
-    # Drop the first two columns from the DataFrame.
-    df = df.iloc[:, 2:]  
+    # Read from CSV
+    df = pd.read_csv(file_path)
+    
+    # Drop the first two columns from the DataFrame
+    df = df.iloc[:, 2:]
+    
+    # Process tags
     df['Conversation tags'] = df['Conversation tags'].apply(clean_and_split_tags)
     exploded_df = df.explode('Conversation tags')
-
+    
     # Count and categorize tags.
     tag_counts = exploded_df['Conversation tags'].value_counts()
     summary_df = pd.DataFrame({
@@ -94,51 +97,51 @@ def process_and_send_file(file_path, files_data):
     ).reset_index()
     category_groups.columns = ['Category Name', 'Tags']
 
-    # Prepare the 'Categories' and 'DT Tags' data.
-    rows = []
-    total_count = 0  # Initialize a counter for the total count of all tags
-    category_summary = {}  # Dictionary to hold category totals
-
-    for category in category_groups.to_dict('records'):
-        category_total = sum(tag['Count'] for tag in category["Tags"])
-        category_summary[category['Category Name']] = category_total  # Store total for each category
-        total_count += category_total  # Sum up the total count of tags for all categories
-
-        rows.append({"Category Name": category['Category Name'], "DT Tags": '', "Count": ''})
-        for tag in category["Tags"]:
-            rows.append({"Category Name": '', "DT Tags": tag['Formatted Tag'], "Count": tag['Count']})
-
-        # Add two empty rows as a separator after each category's tags.
-        rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # First empty row
-        rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Second empty row
-
-    # After the last category, add two more empty rows and a final row with the total count of all tags.
-    rows.append({"Category Name": '', "DT Tags": "Total:", "Count": total_count})  # Row displaying total count
-
-
-    # Add two empty rows as a separator after each category's tags.
-    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # First empty row
-    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Second empty row
-    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Third empty row
-    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Fourth empty row
-    # Append category summary to the end of the rows
-    rows.append({"Category Name": "Number of chats by category", "DT Tags": '', "Count": ''})  # Header row for summary
-    for category, count in category_summary.items():
-        rows.append({"Category Name": category, "DT Tags": count, "Count": ''})
+    rows = prepare_rows(category_groups)
 
     category_df = pd.DataFrame(rows)
-
-    # Merge the exploded_df with the category_df on the basis of index, after resetting index.
     exploded_df.reset_index(drop=True, inplace=True)
     category_df.reset_index(drop=True, inplace=True)
     final_df = pd.concat([exploded_df, category_df], axis=1)
 
     # Save the DataFrame to an Excel file
-    new_file_path = file_path.replace(".xlsx", "_processed.xlsx")
+    new_file_path = file_path.replace(".csv", "_processed.xlsx")
     final_df.to_excel(new_file_path, index=False, engine='openpyxl')
 
-    # Function to upload the file (assumed to be defined elsewhere)
+    # Upload the file (assuming this function is defined elsewhere)
     upload_file(channel_id=channel_id, file_path=new_file_path)
+
+# Helper function to prepare rows as before
+def prepare_rows(category_groups):
+    # Prepare the 'Categories' and 'DT Tags' data.
+    rows = []
+    total_count = 0
+    category_summary = {}
+
+    for category in category_groups.to_dict('records'):
+        category_total = sum(tag['Count'] for tag in category["Tags"])
+        category_summary[category['Category Name']] = category_total
+        total_count += category_total
+
+        rows.append({"Category Name": category['Category Name'], "DT Tags": '', "Count": ''})
+        for tag in category["Tags"]:
+            rows.append({"Category Name": '', "DT Tags": tag['Formatted Tag'], "Count": tag['Count']})
+
+        rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # First empty row
+        rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Second empty row
+
+    # After the last category, add final rows and summary
+    rows.append({"Category Name": '', "DT Tags": "Total:", "Count": total_count})
+    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # First empty row
+    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Second empty row
+    rows.append({"Category Name": '', "DT Tags": '', "Count": ''})  # Third empty row
+    rows.append({"Category Name": "Number of chats by category", "DT Tags": '', "Count": ''})  # Header row for summary
+    
+    for category, count in category_summary.items():
+        rows.append({"Category Name": category, "DT Tags": count, "Count": ''})
+
+    return rows
+
 
 def download_file(files, files_data):
   for file_info in files:
